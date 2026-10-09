@@ -1,0 +1,123 @@
+# edr-tekton :: VMware Carbon Black Profile
+#
+# Carbon Black (now Broadcom/VMware) specializes in behavioral
+# analysis and process chain monitoring. Historically strong
+# on parent-child process relationships and command-line logging.
+#
+# Key detection strengths:
+#   - Behavioral analysis: command-line patterns, process trees
+#   - Cross-process operation monitoring
+#   - Kernel callbacks
+#   - Reputation-based file scoring
+#   - User-mode hooks
+#   - Cloud sandbox for unknown binaries
+#
+# Strategy: Carbon Black is weaker on real-time memory scanning
+# and ETW. PPID spoofing is critical since they focus on process
+# chains. Simpler injection methods can work if the process
+# tree looks clean.
+
+profile:
+  name: carbon_black
+  display_name: "VMware Carbon Black"
+  version: "1.0"
+  vendor: carbon_black
+
+threat_levels:
+  user_hooks: medium       # Standard ntdll hooks
+  kernel_cb: high          # Strong process chain monitoring
+  etw: medium              # Some ETW consumption
+  minifilter: medium       # Standard minifilter
+  wfp: medium              # Network monitoring
+  scanner: medium          # Reputation-based, less deep than Defender
+  elam: low                # Basic boot protection
+  nirvana: none
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: dynamic_resolve
+    fallbacks:
+      - peb_walk
+      - hash_resolve
+    required: true
+    max_risk: 45
+    notes: "Dynamic resolve is fine, CB does not inspect IAT aggressively"
+
+  evasion_pre:
+    primary: ppid_spoof
+    required: true
+    max_risk: 30
+    additional:
+      - sandbox_detect
+      - amsi_patch
+    notes: "PPID spoofing is the highest priority, CB is process-chain focused"
+
+  syscall_init:
+    primary: direct_syscall
+    fallbacks:
+      - indirect_syscall
+    required: true
+    max_risk: 25
+    additional:
+      - ssn_resolve
+
+  decrypt:
+    primary: encrypt_aes
+    fallbacks:
+      - encrypt_rc4
+      - encrypt_xor
+    required: true
+    max_risk: 15
+
+  inject:
+    primary: inject_apc
+    fallbacks:
+      - inject_callback
+      - inject_threadless
+      - inject_classic
+    required: true
+    max_risk: 35
+
+  sleep_init:
+    primary: sleep_ekko
+    fallbacks:
+      - sleep_foliage
+    required: false
+    max_risk: 15
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 170
+  prefer_stealthy: false
+  require_x64: false
+  min_os_build: 14393      # Win10 1607+
+
+sleep:
+  interval_ms: 5000
+  encrypt: true
+
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: xor
+      key_source: static
+
+inject_target: "RuntimeBroker.exe"
+ppid_parent: "svchost.exe"
+
+notes: >
+  Carbon Black's primary strength is behavioral analysis of
+  process chains. PPID spoofing under svchost.exe is the
+  most critical evasion. Their user-mode hooking is standard,
+  so direct syscalls are sufficient. Less aggressive on
+  real-time memory scanning, so single AES encryption is
+  adequate for most payloads.

